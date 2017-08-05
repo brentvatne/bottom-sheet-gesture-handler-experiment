@@ -34,6 +34,7 @@ export default class App extends Component {
 
     this.state = {
       drawerHidden: true,
+      touchInitalScrollY: 0,
     };
   }
 
@@ -64,13 +65,19 @@ export default class App extends Component {
       // Take the gesture end translateY and transfer it to
       // offset, so we can reset the drag
       this._translateYOffset.extractOffset();
-      this._translateYOffset.setValue(translationY);
+      if (hideDrawer && !this.state.drawerHidden) {
+        this._translateYOffset.setValue(translationY - this.state.touchInitalScrollY);
+      } else {
+        this._translateYOffset.setValue(translationY);
+      }
       this._translateYOffset.flattenOffset();
 
       // No longer using the drawerDragY as our drawer position value, it's on the offset now
       this._drawerDragY.setValue(0);
 
-      this.setState({ drawerHidden: hideDrawer });
+      // Get rid of touch initial scroll Y, assuming that initial scrollY is always 0
+      // (so that scroll view must be at the top when transitioning)
+      this.setState({ drawerHidden: hideDrawer, touchInitalScrollY: 0 });
 
       Animated.spring(this._translateYOffset, {
         velocity: velocityY,
@@ -93,6 +100,12 @@ export default class App extends Component {
     fn && fn(e);
   };
 
+  _onStartScroll = e => {
+    console.log(e.nativeEvent);
+    const { contentOffset } = e.nativeEvent;
+    this.setState({ touchInitalScrollY: contentOffset.y });
+  };
+
   render() {
     if (this.state.drawerHidden) {
       this._dragUnlocked = this._drawerDragY;
@@ -103,9 +116,12 @@ export default class App extends Component {
         extrapolate: 'clamp',
       });
 
-      this._dragUnlocked = Animated.multiply(
-        this._unlockDrag,
-        this._drawerDragY
+      this._dragUnlocked = Animated.add(
+        Animated.multiply(
+          this._unlockDrag,
+          Animated.multiply(new Animated.Value(-1), new Animated.Value(this.state.touchInitalScrollY)),
+        ),
+        Animated.multiply(this._unlockDrag, this._drawerDragY)
       );
     }
 
@@ -159,6 +175,7 @@ export default class App extends Component {
                     style={styles.scrollView}
                     bounces={false}
                     onScroll={this._onScroll}
+                    onScrollBeginDrag={this._onStartScroll}
                     scrollEventThrottle={1}
                     contentContainerStyle={{ overflow: 'hidden' }}>
                     <Text style={styles.text}>
