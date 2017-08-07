@@ -7,177 +7,128 @@ import {
 } from 'react-native-gesture-handler';
 
 const USE_NATIVE_DRIVER = true;
+
 const HEADER_HEIGHT = 50;
-const HEIGHT = Dimensions.get('window').height - HEADER_HEIGHT * 4;
-const INITIAL_TRANSLATE_Y_OFFSET = HEIGHT;
+
+const SNAP_POINTS_FROM_TOP = [50, 300, 550];
 
 export default class App extends Component {
   constructor(props) {
     super(props);
 
-    // Value fed in directly from Animated.ScrollView onScroll event
+    const START = SNAP_POINTS_FROM_TOP[0];
+    const END = SNAP_POINTS_FROM_TOP[SNAP_POINTS_FROM_TOP.length - 1];
+
+    this.state = {
+      lastSnap: END,
+    };
+
     this._scrollY = new Animated.Value(0);
     this._onScroll = Animated.event(
       [{ nativeEvent: { contentOffset: { y: this._scrollY } } }],
       { useNativeDriver: USE_NATIVE_DRIVER }
     );
 
-    // Preserves offset
-    this._translateYOffset = new Animated.Value(INITIAL_TRANSLATE_Y_OFFSET);
+    this._lastScrollYValue = 0;
+    this._lastScrollY = new Animated.Value(0);
+    this._onRegisterLastScroll = Animated.event(
+      [{ nativeEvent: { contentOffset: { y: this._lastScrollY } } }],
+      { useNativeDriver: USE_NATIVE_DRIVER }
+    );
+    this._lastScrollY.addListener(({ value }) => {
+      this._lastScrollYValue = value;
+    });
 
-    // Value fed in directly from PanGestureHandler#drawer
-    this._drawerDragY = new Animated.Value(0);
+    this._dragY = new Animated.Value(0);
     this._onGestureEvent = Animated.event(
-      [{ nativeEvent: { translationY: this._drawerDragY } }],
+      [{ nativeEvent: { translationY: this._dragY } }],
       { useNativeDriver: USE_NATIVE_DRIVER }
     );
 
-    this.state = {
-      drawerHidden: true,
-      touchInitalScrollY: 0,
-    };
-  }
+    this._reverseLastScrollY = Animated.multiply(
+      new Animated.Value(-1),
+      this._lastScrollY
+    );
 
+    this._translateYOffset = new Animated.Value(END);
+    this._translateY = Animated.add(
+      this._translateYOffset,
+      Animated.add(this._dragY, this._reverseLastScrollY)
+    ).interpolate({
+      inputRange: [START, END],
+      outputRange: [START, END],
+      extrapolate: 'clamp',
+    });
+
+    this._showScroll = this._translateY.interpolate({
+      inputRange: [START, START + 1],
+      outputRange: [1, 0],
+      extrapolate: 'clamp',
+    });
+  }
   _onHandlerStateChange = ({ nativeEvent }) => {
     if (nativeEvent.oldState === State.ACTIVE) {
-      const { velocityY, translationY } = nativeEvent;
+      let { velocityY, translationY } = nativeEvent;
+      translationY -= this._lastScrollYValue;
       const dragToss = 0.05;
-      const endOffsetY = translationY + dragToss * velocityY;
+      const endOffsetY =
+        this.state.lastSnap + translationY + dragToss * velocityY;
 
-      let toValue = INITIAL_TRANSLATE_Y_OFFSET;
-      let hideDrawer = true;
-      console.log('END OFFSET', endOffsetY);
-
-      if (
-        this.state.drawerHidden &&
-        endOffsetY < -150 /* Should we show it? */
-      ) {
-        toValue = 50;
-        hideDrawer = false;
-      } else if (
-        !this.state.drawerHidden &&
-        endOffsetY < 150 /* Should we keep it open? */
-      ) {
-        toValue = 50;
-        hideDrawer = false;
+      let destSnapPoint = SNAP_POINTS_FROM_TOP[0];
+      for (let i = 0; i < SNAP_POINTS_FROM_TOP.length; i++) {
+        const snapPoint = SNAP_POINTS_FROM_TOP[i];
+        const distFromSnap = Math.abs(snapPoint - endOffsetY);
+        if (distFromSnap < Math.abs(destSnapPoint - endOffsetY)) {
+          destSnapPoint = snapPoint;
+        }
       }
-
-      // Take the gesture end translateY and transfer it to
-      // offset, so we can reset the drag
+      this.setState({ lastSnap: destSnapPoint });
       this._translateYOffset.extractOffset();
-      if (hideDrawer && !this.state.drawerHidden) {
-        this._translateYOffset.setValue(translationY - this.state.touchInitalScrollY);
-      } else {
-        this._translateYOffset.setValue(translationY);
-      }
+      this._translateYOffset.setValue(translationY);
       this._translateYOffset.flattenOffset();
-
-      // No longer using the drawerDragY as our drawer position value, it's on the offset now
-      this._drawerDragY.setValue(0);
-
-      // Get rid of touch initial scroll Y, assuming that initial scrollY is always 0
-      // (so that scroll view must be at the top when transitioning)
-      this.setState({ drawerHidden: hideDrawer, touchInitalScrollY: 0 });
-
+      this._dragY.setValue(0);
       Animated.spring(this._translateYOffset, {
         velocity: velocityY,
         tension: 68,
         friction: 12,
-        toValue,
+        toValue: destSnapPoint,
         useNativeDriver: USE_NATIVE_DRIVER,
       }).start();
     }
   };
-
-  _logState = (id, { nativeEvent }) => {
-    let oldStateName = getStateNameFromEnum(nativeEvent.oldState);
-    let newStateName = getStateNameFromEnum(nativeEvent.state);
-    console.log({ id, oldStateName, newStateName });
-  };
-
-  _logStateAndThen = (id, fn) => e => {
-    this._logState(id, e);
-    fn && fn(e);
-  };
-
-  _onStartScroll = e => {
-    console.log(e.nativeEvent);
-    const { contentOffset } = e.nativeEvent;
-    this.setState({ touchInitalScrollY: contentOffset.y });
-  };
-
   render() {
-    if (this.state.drawerHidden) {
-      this._dragUnlocked = this._drawerDragY;
-    } else {
-      this._unlockDrag = this._scrollY.interpolate({
-        inputRange: [0, 1],
-        outputRange: [1, 0],
-        extrapolate: 'clamp',
-      });
-
-      this._dragUnlocked = Animated.add(
-        Animated.multiply(
-          this._unlockDrag,
-          Animated.multiply(new Animated.Value(-1), new Animated.Value(this.state.touchInitalScrollY)),
-        ),
-        Animated.multiply(this._unlockDrag, this._drawerDragY)
-      );
-    }
-
-    // This value is used by the drawer container -- it is bound bound to the translateY of the drawer container
-    this._translateY = Animated.add(
-      this._dragUnlocked,
-      this._translateYOffset
-    ).interpolate({
-      inputRange: [50, 700],
-      outputRange: [50, 700],
-      extrapolate: 'clamp',
-    });
-
-    const noop = () => {};
-
     return (
       <View style={styles.container}>
         <PanGestureHandler
           id="masterdrawer"
-          simultaneousHandlers="drawer"
-          minDeltaY={HEIGHT}
-          maxDeltaY={this.state.drawerHidden ? HEIGHT : 0}
-          onHandlerStateChange={this._logStateAndThen('masterdrawer', noop)}>
-          <View style={{ flex: 1 }}>
+          minDeltaY={2000 /* infinitely high */}
+          maxDeltaY={this.state.lastSnap - SNAP_POINTS_FROM_TOP[0]}
+          simultaneousHandlers="masterdrawer">
+          <View style={StyleSheet.absoluteFillObject}>
             <PanGestureHandler
               id="drawer"
-              simultaneousHandlers={
-                this.state.drawerHidden
-                  ? ['scroll', 'masterdrawer']
-                  : ['scroll']
-              }
+              simultaneousHandlers={['scroll', 'masterdrawer']}
               onGestureEvent={this._onGestureEvent}
-              onHandlerStateChange={this._logStateAndThen(
-                'drawer',
-                this._onHandlerStateChange
-              )}>
+              onHandlerStateChange={this._onHandlerStateChange}>
               <Animated.View
-                style={{
-                  ...StyleSheet.absoluteFillObject,
-                  transform: [{ translateY: this._translateY }],
-                }}>
-                <View
-                  style={{ height: HEADER_HEIGHT, backgroundColor: 'red' }}
-                />
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  {
+                    transform: [{ translateY: this._translateY }],
+                  },
+                ]}>
+                <View style={styles.header} />
                 <NativeViewGestureHandler
                   id="scroll"
                   waitFor="masterdrawer"
-                  onHandlerStateChange={this._logStateAndThen('scroll', noop)}
                   simultaneousHandlers="drawer">
                   <Animated.ScrollView
                     style={styles.scrollView}
                     bounces={false}
                     onScroll={this._onScroll}
-                    onScrollBeginDrag={this._onStartScroll}
-                    scrollEventThrottle={1}
-                    contentContainerStyle={{ overflow: 'hidden' }}>
+                    onScrollBeginDrag={this._onRegisterLastScroll}
+                    showsVerticalScrollIndicator={this._showScroll}
+                    scrollEventThrottle={1}>
                     <Text style={styles.text}>
                       {LOREM_IPSUM}
                     </Text>
@@ -228,5 +179,9 @@ const styles = StyleSheet.create({
   text: {
     paddingHorizontal: 20,
     paddingVertical: 5,
+  },
+  header: {
+    height: HEADER_HEIGHT,
+    backgroundColor: 'red',
   },
 });
