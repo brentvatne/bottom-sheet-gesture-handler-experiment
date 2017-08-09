@@ -10,7 +10,7 @@ const USE_NATIVE_DRIVER = true;
 
 const HEADER_HEIGHT = 50;
 
-const SNAP_POINTS_FROM_TOP = [50, 300, 550];
+const SNAP_POINTS_FROM_TOP = [50, 300, 500];
 
 export default class App extends Component {
   constructor(props) {
@@ -107,6 +107,7 @@ export default class App extends Component {
           <View style={StyleSheet.absoluteFillObject}>
             <PanGestureHandler
               id="drawer"
+              minDeltaY={0}
               simultaneousHandlers={['scroll', 'masterdrawer']}
               onGestureEvent={this._onGestureEvent}
               onHandlerStateChange={this._onHandlerStateChange}>
@@ -121,13 +122,14 @@ export default class App extends Component {
                 <NativeViewGestureHandler
                   id="scroll"
                   waitFor="masterdrawer"
+                  disallowInterruption={true}
+                  shouldCancelWhenOutside={false}
                   simultaneousHandlers="drawer">
                   <Animated.ScrollView
                     style={styles.scrollView}
                     bounces={false}
                     onScroll={this._onScroll}
                     onScrollBeginDrag={this._onRegisterLastScroll}
-                    showsVerticalScrollIndicator={this._showScroll}
                     scrollEventThrottle={1}>
                     <Text style={styles.text}>
                       {LOREM_IPSUM}
